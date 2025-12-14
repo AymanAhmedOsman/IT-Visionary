@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-backend
+  labels:
+    app: backend
+spec:
+  replicas: {{ .Values.backend.replicas }}
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      securityContext:              # 👈 applies at the pod level
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: backend
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+          securityContext:          # 👈 applies at the container level
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+        #----------
+          resources:                          # ⬅️ ADD THIS
+            requests:
+              cpu: {{ .Values.frontend.resources.requests.cpu }}
+              memory: {{ .Values.frontend.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.frontend.resources.limits.cpu }}
+              memory: {{ .Values.frontend.resources.limits.memory }}
+        #----------      
+          env:
+            - name: DB_HOST
+              value: {{ .Values.backend.db.host }}
+            - name: DB_PORT
+              value: {{ .Values.backend.db.port | quote }}
+            - name: DB_NAME
+              value: {{ .Values.backend.db.name }}
+            - name: DB_USER
+              value: {{ .Values.backend.db.user }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-db-credentials
+                  key: password

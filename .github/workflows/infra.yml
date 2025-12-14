@@ -1,0 +1,83 @@
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Choose environment"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - prod
+
+      action:
+        description: "Terraform action"
+        required: true
+        default: "apply"
+        type: choice
+        options:
+          - apply
+          - destroy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write    # needed for OIDC
+      contents: read     # usually also needed
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        working-directory: infra
+        run: terraform init
+
+      - name: Terraform Destroy
+        if: ${{ github.event.inputs.action == 'destroy' }}
+        working-directory: infra
+        run: terraform destroy -auto-approve -var-file=${{ github.event.inputs.environment }}.tfvars
+      
+      # optional: enable if you want strict formatting
+      # - name: Terraform Fmt
+      #   working-directory: infra
+      #   run: terraform fmt -check -recursive
+
+      - name: Terraform Validate
+        if: ${{ inputs.action == 'apply' }}
+        working-directory: infra
+        run: terraform validate
+
+      - name: Terraform Plan
+        if: ${{ inputs.action == 'apply' }}
+        working-directory: infra
+        run: terraform plan -var-file=${{ inputs.environment }}.tfvars
+
+
+      - name: Run tfsec (security scan)
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: infra
+          soft_fail: true  # Makes scanner non-blocking
+
+      
+      # - name: Terraform Apply Or Destroy
+        
+      #   working-directory: infra
+      #   run: terraform ${{ github.event.inputs.action }} -auto-approve -var-file=${{ github.event.inputs.environment }}.tfvars
+      
+      - name: Terraform Apply
+        if: ${{ github.event.inputs.action == 'apply' }}
+        working-directory: infra
+        run: terraform apply -auto-approve -var-file=${{ github.event.inputs.environment }}.tfvars
+

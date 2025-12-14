@@ -1,0 +1,140 @@
+name: Deploy App to EKS
+
+on:
+  # push:
+  #   branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: eu-west-1                     # Change to your AWS region
+  EKS_CLUSTER_NAME: demo-cluster            # Change to your EKS cluster name
+  FRONTEND_IMAGE: frontend                  # Only repo name
+  BACKEND_IMAGE: backend                    # Only repo name
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # REQUIRED for OIDC
+      contents: read
+
+    steps:
+      # 1. Checkout
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # 2. Configure AWS (using OIDC)
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # 3. Login to ECR
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      # 4. Build & Push Frontend
+      - name: Build and Push Frontend
+        run: |
+          FRONTEND_REPO=${{ steps.ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE }}
+          docker build -t $FRONTEND_REPO:latest ./app-docker/frontend
+        # docker push $FRONTEND_REPO:latest
+
+      # 5. Build & Push Backend
+      - name: Build and Push Backend
+        run: |
+          BACKEND_REPO=${{ steps.ecr.outputs.registry }}/${{ env.BACKEND_IMAGE }}
+          docker build -t $BACKEND_REPO:latest ./app-docker/backend
+       # docker push $BACKEND_REPO:latest
+
+      #------
+      - name: Trivy scan frontend
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE }}:latest
+          format: 'table'
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          exit-code: '0'   # <- do not stop workflow
+      - name: Trivy scan Backend
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.BACKEND_IMAGE }}:latest
+          format: 'table'
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          exit-code: '0'   # <- do not stop workflow
+      #-------
+        
+      - name: push-frontend & backend 
+        run: | 
+          FRONTEND_REPO=${{ steps.ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE }}
+          BACKEND_REPO=${{ steps.ecr.outputs.registry }}/${{ env.BACKEND_IMAGE }}
+          docker push $FRONTEND_REPO:latest
+          docker push $BACKEND_REPO:latest
+
+
+      # 6. Update kubeconfig
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+
+      # 7. Create namespaces with PSA
+      - name: Create namespaces
+        run: |
+          kubectl create namespace app --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create namespace data --dry-run=client -o yaml | kubectl apply -f -
+          kubectl label namespace app pod-security.kubernetes.io/enforce=restricted --overwrite
+          kubectl label namespace data pod-security.kubernetes.io/enforce=restricted --overwrite
+
+      # 8. Install Postgres in "data"
+      - name: Install Postgres via Helm
+        run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo update
+          helm upgrade --install tasks-postgres bitnami/postgresql \
+            --namespace data --create-namespace \
+            --set auth.username=postgres \
+            --set auth.password=${{ secrets.DB_PASSWORD }} \
+            --set auth.database=${{ secrets.DB_DATABASE }} \
+            --set primary.persistence.enabled=false
+
+      # 9. Deploy App chart (frontend + backend) in "app"
+      - name: Deploy App Helm Chart
+        run: |
+          FRONTEND_REPO=${{ steps.ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE }}
+          BACKEND_REPO=${{ steps.ecr.outputs.registry }}/${{ env.BACKEND_IMAGE }}
+
+          helm upgrade --install app ./app-helm -n app \
+            --set frontend.image.repository=$FRONTEND_REPO \
+            --set frontend.image.tag=latest \
+            --set backend.image.repository=$BACKEND_REPO \
+            --set backend.image.tag=latest \
+            --set backend.db.host=tasks-postgres-postgresql.data.svc.cluster.local \
+            --set backend.db.port=5432 \
+            --set backend.db.name=${{ secrets.DB_DATABASE }} \
+            --set backend.db.user=postgres \
+            --set backend.db.password=${{ secrets.DB_PASSWORD }}
+
+      #create monitoring namespace 
+      - name: Create monitoring namespace
+        run: |
+          kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+          kubectl label namespace monitoring pod-security.kubernetes.io/enforce=baseline --overwrite
+
+      # 7.2 Install Prometheus + Grafana via Helm (kube-prometheus-stack)
+      - name: Install Prometheus + Grafana
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          helm upgrade --install kube-prom-stack prometheus-community/kube-prometheus-stack \
+            --namespace monitoring --create-namespace \
+            --set grafana.adminPassword=${{ secrets.GRAFANA_ADMIN_PASSWORD }} \
+            --set grafana.service.type=LoadBalancer \
+            --set prometheus.service.type=LoadBalancer
