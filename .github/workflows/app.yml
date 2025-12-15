@@ -57,7 +57,7 @@ jobs:
         uses: aquasecurity/trivy-action@0.24.0
         with:
           image-ref: |
-            ${{ steps.ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE }}:$COMMIT_TAG
+            ${{ steps.ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE }}:$SHORT_TAG
           format: 'table'
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
