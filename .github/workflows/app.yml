@@ -39,7 +39,10 @@ jobs:
       - name: Build and Push Frontend
         run: |
           FRONTEND_REPO=${{ steps.ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE }}
-          docker build -t $FRONTEND_REPO:$COMMIT_TAG ./app-docker/frontend
+              # Use GitHub's SHA (first 7 chars = short commit hash)
+          COMMIT_TAG=${{ github.sha }}
+          SHORT_TAG=${COMMIT_TAG:0:7}
+          docker build -t $FRONTEND_REPO:$SHORT_TAG ./app-docker/frontend
         # docker push $FRONTEND_REPO:latest
 
       # 5. Build & Push Backend
@@ -76,7 +79,7 @@ jobs:
         run: | 
           FRONTEND_REPO=${{ steps.ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE }}
           BACKEND_REPO=${{ steps.ecr.outputs.registry }}/${{ env.BACKEND_IMAGE }}
-          docker push $FRONTEND_REPO:$COMMIT_TAG
+          docker push $FRONTEND_REPO:$SHORT_TAG
           docker push $BACKEND_REPO:latest
 
 
