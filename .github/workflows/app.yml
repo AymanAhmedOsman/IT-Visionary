@@ -37,9 +37,11 @@ jobs:
 
       # 4. Build & Push Frontend
       - name: Build and Push Frontend
+        env: 
+          IMAGE_TAG: auth-${{ github.sha }}
         run: |
           FRONTEND_REPO=${{ steps.ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE }}
-          docker build -t $FRONTEND_REPO:latest ./app-docker/frontend
+          docker build -t $FRONTEND_REPO:$IMAGE_TAG ./app-docker/frontend
         # docker push $FRONTEND_REPO:latest
 
       # 5. Build & Push Backend
@@ -54,7 +56,7 @@ jobs:
         uses: aquasecurity/trivy-action@0.24.0
         with:
           image-ref: |
-            ${{ steps.ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE }}:latest
+            ${{ steps.ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE }}:$IMAGE_TAG
           format: 'table'
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
@@ -76,7 +78,7 @@ jobs:
         run: | 
           FRONTEND_REPO=${{ steps.ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE }}
           BACKEND_REPO=${{ steps.ecr.outputs.registry }}/${{ env.BACKEND_IMAGE }}
-          docker push $FRONTEND_REPO:latest
+          docker push $FRONTEND_REPO:$IMAGE_TAG
           docker push $BACKEND_REPO:latest
 
 
