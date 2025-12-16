@@ -9,8 +9,7 @@ env:
   AWS_REGION: eu-west-1                     # Change to your AWS region
   EKS_CLUSTER_NAME: demo-cluster            # Change to your EKS cluster name
   FRONTEND_IMAGE: frontend                  # Only repo name
-  BACKEND_IMAGE: backend    
-  IMAGE_TAG: auth-${{ github.sha }}                # Only repo name
+  BACKEND_IMAGE: backend                    # Only repo name
 
 jobs:
   build-and-deploy:
@@ -37,10 +36,10 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v1
 
       # 4. Build & Push Frontend
-      - name: Build and Push Frontend         
+      - name: Build and Push Frontend
         run: |
           FRONTEND_REPO=${{ steps.ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE }}
-          docker build -t $FRONTEND_REPO:$IMAGE_TAG ./app-docker/frontend
+          docker build -t $FRONTEND_REPO:latest ./app-docker/frontend
         # docker push $FRONTEND_REPO:latest
 
       # 5. Build & Push Backend
@@ -55,7 +54,7 @@ jobs:
         uses: aquasecurity/trivy-action@0.24.0
         with:
           image-ref: |
-            ${{ steps.ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE }}:$IMAGE_TAG
+            ${{ steps.ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE }}:latest
           format: 'table'
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
@@ -77,7 +76,7 @@ jobs:
         run: | 
           FRONTEND_REPO=${{ steps.ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE }}
           BACKEND_REPO=${{ steps.ecr.outputs.registry }}/${{ env.BACKEND_IMAGE }}
-          docker push $FRONTEND_REPO:$IMAGE_TAG
+          docker push $FRONTEND_REPO:latest
           docker push $BACKEND_REPO:latest
 
 
